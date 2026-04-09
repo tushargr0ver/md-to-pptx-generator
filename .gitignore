@@ -1,0 +1,32 @@
+# Node/React
+node_modules/
+dist/
+build/
+.npm
+
+# Python/FastAPI
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+venv/
+.venv/
+env/
+
+# Environments
+.env
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# Project specifics
+notes/
+
+# Temporary test scripts we used
+test_*.py
+debug_*.py
+test.md
+
+# My personal notes
+demo_video_guide.md
