@@ -18,9 +18,10 @@ from pipeline.StorytellerAgent import generate_slide_structure
 from pipeline.PPTXRenderer import PPTXRenderer
 
 # Paths
-TEST_CASES_DIR = Path("../notes/Code EZ_ Master of Agents _ Files-20260409T100059Z-3-001/Code EZ_ Master of Agents _ Files/Test Cases")
+BASE_DIR = Path(__file__).parent.parent
+TEST_CASES_DIR = BASE_DIR / "notes/Code EZ_ Master of Agents _ Files-20260409T100059Z-3-001/Code EZ_ Master of Agents _ Files/Test Cases"
 MASTER_PATH = Path(__file__).parent / "assets" / "Template.pptx"
-OUTPUT_DIR = Path("../generated_outputs")
+OUTPUT_DIR = BASE_DIR / "v2_generated_outputs"
 
 # Limits
 MAX_CHARS = 400_000  # ~100K tokens, well within 1M TPM limit for Flash
@@ -34,11 +35,6 @@ def process_file(md_path: Path, output_dir: Path):
     # Create output folder
     folder = output_dir / name
     pptx_path = folder / f"{name}.pptx"
-    
-    # Skip if already exists
-    if pptx_path.exists():
-        print(f"  ⏭ Skipping: {name}.pptx already exists")
-        return True
     
     # Read and optionally truncate
     md_text = md_path.read_text(encoding="utf-8")

@@ -30,3 +30,7 @@ test.md
 
 # My personal notes
 demo_video_guide.md
+
+# Backend specific
+backend/venv/
+backend/__pycache__/

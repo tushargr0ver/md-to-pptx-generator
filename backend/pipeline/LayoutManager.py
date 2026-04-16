@@ -46,10 +46,12 @@ class LayoutManager:
         self.layout_map = {
             "title_slide": 0,            # Cover slide
             "section_divider": 2,        # Divider
-            "content_text": 3,           # Blank - full programmatic control
-            "bullet_points": 3,          # Blank - full programmatic control
-            "content_chart": 3,          # Blank - full programmatic control
-            "infographic_process": 3,    # Blank - full programmatic control
+            "content_text": 4,           # Title only
+            "bullet_points": 4,          # Title only
+            "content_chart": 4,          # Title only
+            "infographic_process": 4,    # Title only
+            "infographic_swot": 4,       # Title only
+            "infographic_comparison": 4, # Title only
             "conclusion": 5,             # Thank You
         }
         

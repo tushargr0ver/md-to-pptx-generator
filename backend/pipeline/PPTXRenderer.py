@@ -74,6 +74,26 @@ class PPTXRenderer:
         layout = self.layout_manager.get_layout(slide_data.slide_type)
         slide = self.prs.slides.add_slide(layout)
         
+        # Remove placeholders we are not using to prevent prompt text (like "Source") from appearing
+        unused_ph_indices = []
+        is_title_slide = (slide_data.slide_type == "title_slide")
+        for ph in slide.placeholders:
+            idx = ph.placeholder_format.idx
+            ptype = ph.placeholder_format.type
+            
+            # Keep Title (1) and Slide Number (13) everywhere.
+            # Keep indices 10 and 11 ONLY on the Title Slide.
+            keep = (ptype in [1, 13]) or (is_title_slide and idx in [10, 11])
+            
+            if not keep:
+                unused_ph_indices.append(idx)
+        
+        # We must iterate over a list of shapes to delete them safely
+        for shape in list(slide.shapes):
+            if shape.is_placeholder and shape.placeholder_format.idx in unused_ph_indices:
+                sp = shape._element
+                sp.getparent().remove(sp)
+        
         if slide_data.slide_type == "title_slide":
             self._render_title_slide(slide, slide_data)
         elif slide_data.slide_type in ["content_text", "bullet_points"]:
@@ -82,6 +102,10 @@ class PPTXRenderer:
             self._render_chart_slide(slide, slide_data)
         elif slide_data.slide_type == "infographic_process":
             self._render_infographic_slide(slide, slide_data)
+        elif slide_data.slide_type == "infographic_swot":
+            self._render_swot_slide(slide, slide_data)
+        elif slide_data.slide_type == "infographic_comparison":
+            self._render_comparison_slide(slide, slide_data)
         elif slide_data.slide_type == "conclusion":
             self._render_conclusion_slide(slide, slide_data)
         else:
@@ -100,30 +124,57 @@ class PPTXRenderer:
         line.line.width = Pt(0.75)
 
     def _add_slide_number(self, slide):
-        """Add slide number at bottom-right (like reference slide 10 position)."""
-        txBox = slide.shapes.add_textbox(
-            Inches(9.94), Inches(7.23), Inches(3.0), Inches(0.13)
-        )
-        tf = txBox.text_frame
-        tf.text = str(self.slide_number)
-        p = tf.paragraphs[0]
-        p.font.size = Pt(8)
-        p.font.color.rgb = self.COLOR_SUBTITLE
-        p.alignment = PP_ALIGN.RIGHT
+        """Add slide number at bottom-right. Use placeholder if available."""
+        slidenum_ph = None
+        for ph in slide.placeholders:
+            if ph.placeholder_format.type == 13: # SLIDE_NUMBER
+                slidenum_ph = ph
+                break
+        
+        if slidenum_ph:
+            slidenum_ph.text = str(self.slide_number)
+        else:
+            txBox = slide.shapes.add_textbox(
+                Inches(9.94), Inches(7.23), Inches(3.0), Inches(0.13)
+            )
+            tf = txBox.text_frame
+            tf.text = str(self.slide_number)
+            p = tf.paragraphs[0]
+            p.font.size = Pt(8)
+            p.font.color.rgb = self.COLOR_SUBTITLE
+            p.alignment = PP_ALIGN.RIGHT
 
     def _add_title_bar(self, slide, title_text):
-        """Add the section title as a text box at the standard position."""
-        txBox = slide.shapes.add_textbox(
-            self.MARGIN_LEFT, Inches(0.66),
-            Inches(11.65), Inches(0.58)
-        )
-        tf = txBox.text_frame
-        tf.text = title_text
-        p = tf.paragraphs[0]
-        p.font.size = Pt(22)
-        p.font.bold = True
-        p.font.color.rgb = self.COLOR_TITLE
-    
+        """Add the section title. Use title placeholder if available, otherwise add textbox."""
+        title_ph = None
+        for ph in slide.placeholders:
+            if ph.placeholder_format.type == 1: # TITLE
+                title_ph = ph
+                break
+        
+        if title_ph:
+            title_ph.text = title_text
+        else:
+            # Fallback to looking for PH idx 0 (often title)
+            for ph in slide.placeholders:
+                if ph.placeholder_format.idx == 0:
+                    title_ph = ph
+                    break
+            
+            if title_ph:
+                title_ph.text = title_text
+            else:
+                txBox = slide.shapes.add_textbox(
+                    self.MARGIN_LEFT, Inches(0.66),
+                    Inches(11.65), Inches(0.58)
+                )
+                tf = txBox.text_frame
+                tf.text = title_text
+                p = tf.paragraphs[0]
+                p.font.size = Pt(22)
+                p.font.bold = True
+                p.font.color.rgb = self.COLOR_TITLE
+
     def _add_subtitle_bar(self, slide, subtitle_text):
         """Add a subtitle below the title."""
         txBox = slide.shapes.add_textbox(
@@ -131,6 +182,7 @@ class PPTXRenderer:
             Inches(11.65), Inches(0.3)
         )
         tf = txBox.text_frame
+        tf.margin_left = Inches(0.1)
         tf.text = subtitle_text
         p = tf.paragraphs[0]
         p.font.size = Pt(13)
@@ -166,8 +218,18 @@ class PPTXRenderer:
         line.line.color.rgb = self.COLOR_LINE
         line.line.width = Pt(0.5)
 
+    def _add_connecting_arrow(self, slide, x, y, width):
+        """Add a horizontal arrow connecting infographic steps."""
+        arrow = slide.shapes.add_shape(
+            MSO_SHAPE.RIGHT_ARROW,
+            x, y, width, Inches(0.2)
+        )
+        arrow.fill.solid()
+        arrow.fill.fore_color.rgb = self.COLOR_LINE
+        arrow.line.fill.background()
+
     def _add_content_card(self, slide, left, top, width, height, title, body, badge_num=None):
-        """Add a content card with optional numbered badge (like reference grid items)."""
+        """Add a content card with internal margins and vertical centering."""
         card_top = top
         
         # Add numbered badge if provided
@@ -180,6 +242,9 @@ class PPTXRenderer:
         # Card title (bold)
         title_box = slide.shapes.add_textbox(left, card_top, width, Inches(0.45))
         tf = title_box.text_frame
+        tf.margin_left = Inches(0.1)
+        tf.margin_right = Inches(0.1)
+        tf.vertical_anchor = MSO_ANCHOR.MIDDLE
         tf.word_wrap = True
         tf.text = title
         p = tf.paragraphs[0]
@@ -189,9 +254,14 @@ class PPTXRenderer:
         p.alignment = PP_ALIGN.LEFT
         
         # Card body text
-        remaining_height = height - (card_top - top) - Inches(0.5)
-        body_box = slide.shapes.add_textbox(left, card_top + Inches(0.45), width, remaining_height)
+        body_top = card_top + Inches(0.45)
+        body_height = height - (body_top - top)
+        body_box = slide.shapes.add_textbox(left, body_top, width, body_height)
         tf2 = body_box.text_frame
+        tf2.margin_left = Inches(0.1)
+        tf2.margin_right = Inches(0.1)
+        tf2.margin_top = Inches(0.05)
+        tf2.vertical_anchor = MSO_ANCHOR.TOP
         tf2.word_wrap = True
         tf2.text = body
         p2 = tf2.paragraphs[0]
@@ -306,25 +376,28 @@ class PPTXRenderer:
                 self._add_vertical_divider(slide, divider_x, Inches(2.0), Inches(4.5))
 
     def _render_bullet_list(self, slide, items):
-        """Render as a styled bullet list with left accent bar."""
+        """Render as a styled bullet list with left accent bar and internal margins."""
         # Accent bar on the left
+        bar_height = min(Inches(4.2), Inches(0.5 * len(items) + 0.5))
         bar = slide.shapes.add_shape(
             MSO_SHAPE.RECTANGLE,
             self.MARGIN_LEFT, Inches(1.8),
-            Inches(0.08), Inches(4.2)
+            Inches(0.08), bar_height
         )
         bar.fill.solid()
         bar.fill.fore_color.rgb = self.COLOR_ACCENT
         bar.line.fill.background()
         
-        # Bullet items
+        # Bullet items container
         left = Inches(0.8)
         top = Inches(1.8)
         width = Inches(11.5)
-        height = Inches(4.2)
+        height = Inches(4.5)
         
         txBox = slide.shapes.add_textbox(left, top, width, height)
         tf = txBox.text_frame
+        tf.margin_left = Inches(0.2)
+        tf.margin_top = Inches(0.1)
         tf.word_wrap = True
         
         for i, text in enumerate(items):
@@ -332,7 +405,8 @@ class PPTXRenderer:
             p.text = f"▸  {text}"
             p.font.size = Pt(14)
             p.font.color.rgb = self.COLOR_BODY
-            p.space_after = Pt(14)
+            p.space_after = Pt(12)
+            p.level = 0
 
     def _render_chart_slide(self, slide, slide_data: Slide):
         """Render a chart slide with title, native chart, and caption."""
@@ -383,6 +457,8 @@ class PPTXRenderer:
                 Inches(4.36), Inches(7.12), Inches(4.61), Inches(0.25)
             )
             tf = cap_box.text_frame
+            tf.margin_left = Inches(0.1)
+            tf.margin_right = Inches(0.1)
             tf.text = slide_data.subtitle
             tf.paragraphs[0].font.size = Pt(10)
             tf.paragraphs[0].font.italic = True
@@ -445,6 +521,8 @@ class PPTXRenderer:
             shape.line.fill.background()
             
             tf = shape.text_frame
+            tf.margin_left = Inches(0.1)
+            tf.margin_right = Inches(0.1)
             tf.word_wrap = True
             tf.text = step.title
             p = tf.paragraphs[0]
@@ -460,6 +538,8 @@ class PPTXRenderer:
                 int(col_width), Inches(2.0)
             )
             dtf = desc_box.text_frame
+            dtf.margin_left = Inches(0.1)
+            dtf.margin_right = Inches(0.1)
             dtf.word_wrap = True
             dtf.text = step.description or ""
             dp = dtf.paragraphs[0]
@@ -471,8 +551,119 @@ class PPTXRenderer:
             if i < num_steps - 1:
                 divider_x = left + col_width + gap / 2
                 self._add_vertical_divider(slide, divider_x, top, Inches(5.0))
+                
+                # Add horizontal connecting arrow between chevrons
+                arrow_x = left + col_width
+                arrow_y = chevron_top + chevron_height / 2 - Inches(0.1)
+                self._add_connecting_arrow(slide, arrow_x, arrow_y, gap)
         
         # Bottom elements
+        self._add_bottom_line(slide)
+        self._add_slide_number(slide)
+
+    def _render_swot_slide(self, slide, slide_data: Slide):
+        """Render a 2x2 SWOT analysis grid."""
+        self._add_title_bar(slide, slide_data.title)
+        
+        swot = slide_data.swot_data
+        if not swot:
+            self._render_content_slide(slide, slide_data)
+            return
+            
+        # Map model attributes to display keys
+        swot_map = {
+            "STRENGTHS": swot.strengths,
+            "WEAKNESSES": swot.weaknesses,
+            "OPPORTUNITIES": swot.opportunities,
+            "THREATS": swot.threats
+        }
+        
+        card_w = (self.CONTENT_WIDTH - Inches(0.4)) / 2
+        card_h = Inches(2.2)
+        
+        for i, (key, items) in enumerate(swot_map.items()):
+            row = i // 2
+            col = i % 2
+            left = self.MARGIN_LEFT + col * (card_w + Inches(0.4))
+            top = self.CONTENT_TOP + row * (card_h + Inches(0.4))
+            
+            # Card background
+            shape = slide.shapes.add_shape(
+                MSO_SHAPE.RECTANGLE, left, top, card_w, card_h
+            )
+            shape.fill.solid()
+            shape.fill.fore_color.rgb = self.COLOR_LIGHT_BG
+            shape.line.color.rgb = self.COLOR_ACCENT if row == 0 else self.COLOR_ACCENT2
+            shape.line.width = Pt(2)
+            
+            # Key title
+            tBox = slide.shapes.add_textbox(left + Inches(0.1), top + Inches(0.1), card_w - Inches(0.2), Inches(0.4))
+            tf = tBox.text_frame
+            tf.text = key
+            tf.paragraphs[0].font.bold = True
+            tf.paragraphs[0].font.size = Pt(14)
+            tf.paragraphs[0].font.color.rgb = self.COLOR_TITLE
+            
+            # Content
+            cBox = slide.shapes.add_textbox(left + Inches(0.1), top + Inches(0.5), card_w - Inches(0.2), card_h - Inches(0.6))
+            ctf = cBox.text_frame
+            ctf.word_wrap = True
+            
+            for item in items:
+                p = ctf.add_paragraph()
+                p.text = f"• {item}"
+                p.font.size = Pt(10)
+                p.font.color.rgb = self.COLOR_BODY
+
+    def _render_comparison_slide(self, slide, slide_data: Slide):
+        """Render a side-by-side comparison grid."""
+        self._add_title_bar(slide, slide_data.title)
+        
+        pairs = slide_data.comparison_data or []
+        if not pairs:
+            self._render_content_slide(slide, slide_data)
+            return
+            
+        num_cols = len(pairs)
+        gap = Inches(0.2)
+        col_w = (self.CONTENT_WIDTH - (gap * (num_cols-1))) / num_cols
+        
+        for i, pair in enumerate(pairs):
+            left = self.MARGIN_LEFT + i * (col_w + gap)
+            top = self.CONTENT_TOP
+            
+            # Header
+            header_h = Inches(0.6)
+            h_shape = slide.shapes.add_shape(
+                MSO_SHAPE.RECTANGLE, left, top, col_w, header_h
+            )
+            h_shape.fill.solid()
+            h_shape.fill.fore_color.rgb = self.COLOR_ACCENT if i % 2 == 0 else self.COLOR_ACCENT2
+            h_shape.line.fill.background()
+            
+            htf = h_shape.text_frame
+            htf.text = pair.key
+            htf.vertical_anchor = MSO_ANCHOR.MIDDLE
+            htf.paragraphs[0].alignment = PP_ALIGN.CENTER
+            htf.paragraphs[0].font.bold = True
+            htf.paragraphs[0].font.color.rgb = self.COLOR_WHITE
+            
+            # Content
+            content_h = Inches(3.5)
+            c_shape = slide.shapes.add_shape(
+                MSO_SHAPE.RECTANGLE, left, top + header_h, col_w, content_h
+            )
+            c_shape.fill.solid()
+            c_shape.fill.fore_color.rgb = self.COLOR_LIGHT_BG
+            c_shape.line.color.rgb = self.COLOR_LINE
+            
+            ctf = c_shape.text_frame
+            ctf.margin_left = Inches(0.1)
+            ctf.margin_right = Inches(0.1)
+            ctf.text = pair.value
+            ctf.paragraphs[0].font.size = Pt(11)
+            ctf.paragraphs[0].font.color.rgb = self.COLOR_BODY
+            
         self._add_bottom_line(slide)
         self._add_slide_number(slide)
 
